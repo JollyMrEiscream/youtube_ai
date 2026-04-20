@@ -1,0 +1,8 @@
+# Copy to config/feeds.yaml and customize.
+# Each entry is either a string (RSS URL) or { url: "...", name: "optional label" }
+
+feeds:
+  - url: https://feeds.bbci.co.uk/news/world/rss.xml
+    name: BBC World
+  - url: https://www.theguardian.com/world/rss
+    name: Guardian World

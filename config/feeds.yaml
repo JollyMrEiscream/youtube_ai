@@ -1,0 +1,8 @@
+# RSS sources for the bot (edit as needed). Used by local runs and GitHub Actions
+# unless the RSS_FEED_URLS secret is set (which overrides the file).
+
+feeds:
+  - url: https://feeds.bbci.co.uk/news/world/rss.xml
+    name: BBC World
+  - url: https://www.theguardian.com/world/rss
+    name: Guardian World

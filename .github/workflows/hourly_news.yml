@@ -1,0 +1,47 @@
+name: Hourly news YouTube bot
+
+on:
+  schedule:
+    # 15 minutes past each hour UTC — adjust as needed
+    - cron: "15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Run pipeline
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          NEWS_WINDOW_MINUTES: ${{ vars.NEWS_WINDOW_MINUTES }}
+          MAX_STORIES: ${{ vars.MAX_STORIES }}
+          TTS_ENGINE: ${{ vars.TTS_ENGINE }}
+          TTS_VOICE: ${{ vars.TTS_VOICE }}
+          VIDEO_WIDTH: ${{ vars.VIDEO_WIDTH }}
+          VIDEO_HEIGHT: ${{ vars.VIDEO_HEIGHT }}
+          YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
+          YOUTUBE_CATEGORY_ID: ${{ vars.YOUTUBE_CATEGORY_ID }}
+          YOUTUBE_TAGS: ${{ vars.YOUTUBE_TAGS }}
+          DRY_RUN: ${{ vars.DRY_RUN }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          # Multiline secret: one RSS URL per line
+          RSS_FEED_URLS: ${{ secrets.RSS_FEED_URLS }}
+        run: python -m news_youtube_bot
