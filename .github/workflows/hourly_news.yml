@@ -22,6 +22,8 @@ jobs:
       - name: Install package
         run: pip install -e .
 
+      # Repo variables that are not set expand to empty; the app treats that as defaults.
+      # DRY_RUN defaults to 1 here so real uploads are opt-in (set DRY_RUN=0 in repo variables).
       - name: Run pipeline
         env:
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
@@ -38,7 +40,7 @@ jobs:
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
           YOUTUBE_CATEGORY_ID: ${{ vars.YOUTUBE_CATEGORY_ID }}
           YOUTUBE_TAGS: ${{ vars.YOUTUBE_TAGS }}
-          DRY_RUN: ${{ vars.DRY_RUN }}
+          DRY_RUN: ${{ vars.DRY_RUN || '1' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}

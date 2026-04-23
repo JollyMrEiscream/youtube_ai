@@ -7,19 +7,56 @@ from pathlib import Path
 import yaml
 
 
+def _env_str(name: str, default: str) -> str:
+    """GitHub Actions often injects `VAR=` (empty) when a repo var is unset; treat as missing."""
+    v = os.environ.get(name)
+    if v is None or not str(v).strip():
+        return default
+    return str(v).strip()
+
+
+def _env_int(name: str, default: int) -> int:
+    v = os.environ.get(name)
+    if v is None or not str(v).strip():
+        return default
+    return int(str(v).strip(), 10)
+
+
+def _env_float(name: str, default: float) -> float:
+    v = os.environ.get(name)
+    if v is None or not str(v).strip():
+        return default
+    return float(str(v).strip())
+
+
+def _opt_str(name: str) -> str | None:
+    v = os.environ.get(name)
+    if v is None or not str(v).strip():
+        return None
+    return str(v).strip()
+
+
+def _first_opt_str(*names: str) -> str | None:
+    for n in names:
+        s = _opt_str(n)
+        if s is not None:
+            return s
+    return None
+
+
 def _truthy(name: str, default: bool = False) -> bool:
     v = os.environ.get(name)
-    if v is None:
+    if v is None or not str(v).strip():
         return default
     return v.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _resolve_llm_provider() -> str:
-    explicit = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    explicit = _env_str("LLM_PROVIDER", "").lower()
     if explicit in ("openai", "gemini"):
         return explicit
-    gemini = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    openai = os.environ.get("OPENAI_API_KEY")
+    gemini = _first_opt_str("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    openai = _opt_str("OPENAI_API_KEY")
     if gemini and not openai:
         return "gemini"
     return "openai"
@@ -53,37 +90,39 @@ class Settings:
     @classmethod
     def load(cls, project_root: Path | None = None) -> Settings:
         root = project_root or Path.cwd()
-        feeds_path = Path(os.environ.get("FEEDS_FILE", str(root / "config" / "feeds.yaml")))
+        feeds_path = Path(_env_str("FEEDS_FILE", str(root / "config" / "feeds.yaml")))
         raw_urls = os.environ.get("RSS_FEED_URLS")
         rss_list: list[str] | None = None
         if raw_urls and raw_urls.strip():
             rss_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
 
-        tags_raw = os.environ.get("YOUTUBE_TAGS", "news,summary,ai")
+        tags_raw = _env_str("YOUTUBE_TAGS", "news,summary,ai")
         tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
+
+        out_dir = Path(_env_str("OUTPUT_DIR", str(root / "output")))
 
         return cls(
             feeds_file=feeds_path,
-            news_window_minutes=int(os.environ.get("NEWS_WINDOW_MINUTES", "90")),
-            max_stories=int(os.environ.get("MAX_STORIES", "5")),
+            news_window_minutes=_env_int("NEWS_WINDOW_MINUTES", 90),
+            max_stories=_env_int("MAX_STORIES", 5),
             llm_provider=_resolve_llm_provider(),
-            gemini_api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
-            gemini_model=os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"),
-            openai_api_key=os.environ.get("OPENAI_API_KEY"),
-            openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-            tts_engine=os.environ.get("TTS_ENGINE", "openai").strip().lower(),
-            tts_voice=os.environ.get("TTS_VOICE", "alloy"),
-            video_width=int(os.environ.get("VIDEO_WIDTH", "1920")),
-            video_height=int(os.environ.get("VIDEO_HEIGHT", "1080")),
+            gemini_api_key=_first_opt_str("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+            gemini_model=_env_str("GEMINI_MODEL", "gemini-1.5-flash"),
+            openai_api_key=_opt_str("OPENAI_API_KEY"),
+            openai_model=_env_str("OPENAI_MODEL", "gpt-4o-mini"),
+            tts_engine=_env_str("TTS_ENGINE", "openai").lower(),
+            tts_voice=_env_str("TTS_VOICE", "alloy"),
+            video_width=_env_int("VIDEO_WIDTH", 1920),
+            video_height=_env_int("VIDEO_HEIGHT", 1080),
             dry_run=_truthy("DRY_RUN", False),
-            output_dir=Path(os.environ.get("OUTPUT_DIR", str(root / "output"))),
-            youtube_privacy=os.environ.get("YOUTUBE_PRIVACY", "private").strip().lower(),
-            google_client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-            google_client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
-            youtube_refresh_token=os.environ.get("YOUTUBE_REFRESH_TOKEN"),
-            youtube_category_id=os.environ.get("YOUTUBE_CATEGORY_ID", "25"),  # News & Politics
+            output_dir=out_dir,
+            youtube_privacy=_env_str("YOUTUBE_PRIVACY", "private").lower(),
+            google_client_id=_opt_str("GOOGLE_CLIENT_ID"),
+            google_client_secret=_opt_str("GOOGLE_CLIENT_SECRET"),
+            youtube_refresh_token=_opt_str("YOUTUBE_REFRESH_TOKEN"),
+            youtube_category_id=_env_str("YOUTUBE_CATEGORY_ID", "25"),  # News & Politics
             default_tags=tags,
-            fetch_timeout_seconds=float(os.environ.get("FETCH_TIMEOUT_SECONDS", "20")),
+            fetch_timeout_seconds=_env_float("FETCH_TIMEOUT_SECONDS", 20.0),
             rss_feed_urls=rss_list,
         )
 
