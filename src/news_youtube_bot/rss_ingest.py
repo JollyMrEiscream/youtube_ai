@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -10,13 +9,11 @@ import feedparser
 import httpx
 
 from news_youtube_bot.config import Settings
+from news_youtube_bot.media import USER_AGENT
 from news_youtube_bot.models import NewsItem
+from news_youtube_bot.textutil import html_to_text, stable_id
 
 logger = logging.getLogger(__name__)
-
-
-def _stable_id(link: str) -> str:
-    return hashlib.sha256(link.encode("utf-8")).hexdigest()[:16]
 
 
 def _parse_published(entry: dict[str, Any]) -> datetime | None:
@@ -49,19 +46,18 @@ def _normalize_entry(
     if not link:
         return None
     summary = entry.get("summary") or entry.get("description") or ""
-    if isinstance(summary, str):
-        summary = summary.strip()
-    else:
+    if not isinstance(summary, str):
         summary = str(summary)
+    summary = html_to_text(summary)
     published = _parse_published(entry)
     return NewsItem(
-        id=_stable_id(link),
+        id=stable_id(link),
         title=title,
         link=link,
         summary=summary,
         published=published,
         feed_name=feed_name,
-        raw={"guid": entry.get("id")},
+        raw={"guid": entry.get("id"), "tech": True, "source_kind": "rss"},
     )
 
 
@@ -98,7 +94,7 @@ def ingest_all(
         return []
 
     out: list[NewsItem] = []
-    with httpx.Client(headers={"User-Agent": "news-youtube-bot/0.1 (+https://github.com)"}) as client:
+    with httpx.Client(headers={"User-Agent": USER_AGENT}, follow_redirects=True) as client:
         for url, name in feed_pairs:
             out.extend(fetch_feed(client, url, name, settings.fetch_timeout_seconds))
     return out

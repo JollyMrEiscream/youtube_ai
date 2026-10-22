@@ -1,8 +1,20 @@
-# RSS sources for the bot (edit as needed). Used by local runs and GitHub Actions
-# unless the RSS_FEED_URLS secret is set (which overrides the file).
+# Technology feeds for the daily Shorts run.
+# RSS_FEED_URLS overrides this file when set (one URL per line).
 
 feeds:
-  - url: https://feeds.bbci.co.uk/news/world/rss.xml
-    name: BBC World
-  - url: https://www.theguardian.com/world/rss
-    name: Guardian World
+  - url: https://hnrss.org/frontpage
+    name: Hacker News
+  - url: https://www.theverge.com/rss/index.xml
+    name: The Verge
+  - url: https://techcrunch.com/feed/
+    name: TechCrunch
+  - url: https://feeds.arstechnica.com/arstechnica/index
+    name: Ars Technica
+  - url: https://www.wired.com/feed/rss
+    name: Wired
+  - url: https://www.technologyreview.com/feed/
+    name: MIT Tech Review
+  - url: https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
+    name: NYT Technology
+  - url: https://feeds.bbci.co.uk/news/technology/rss.xml
+    name: BBC Technology

@@ -1,3 +1,3 @@
-"""Hourly RSS news digest pipeline: rank, script, TTS, video, YouTube."""
+"""Daily technology YouTube Shorts: fresh stories, vertical motion, review, then upload."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
