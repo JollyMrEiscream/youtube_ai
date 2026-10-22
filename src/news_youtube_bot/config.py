@@ -120,6 +120,12 @@ class Settings:
     rss_feed_urls: list[str] | None
     pexels_api_key: str | None
     pixabay_api_key: str | None
+    xai_api_key: str | None
+    xai_video_model: str
+    xai_video_duration: int
+    xai_poll_timeout: float
+    max_ai_clips_per_day: int
+    clip_reuse_days: int
     news_api_key: str | None
     auto_upload: bool
     skip_review: bool
@@ -175,6 +181,12 @@ class Settings:
             rss_feed_urls=rss_list,
             pexels_api_key=_opt_str("PEXELS_API_KEY"),
             pixabay_api_key=_opt_str("PIXABAY_API_KEY"),
+            xai_api_key=_opt_str("XAI_API_KEY"),
+            xai_video_model=_env_str("XAI_VIDEO_MODEL", "grok-imagine-video-1.5"),
+            xai_video_duration=min(15, max(1, _env_int("XAI_VIDEO_DURATION", 4))),
+            xai_poll_timeout=_env_float("XAI_POLL_TIMEOUT_SECONDS", 480),
+            max_ai_clips_per_day=max(0, _env_int("MAX_AI_CLIPS_PER_DAY", 10)),
+            clip_reuse_days=max(1, _env_int("CLIP_REUSE_DAYS", 7)),
             news_api_key=_first_opt_str("NEWS_API_KEY", "NEWSAPI_KEY"),
             auto_upload=_truthy("AUTO_UPLOAD", False),
             skip_review=_truthy("SKIP_REVIEW", False),

@@ -8,7 +8,9 @@ import pytest
 from news_youtube_bot.captions import ass_timestamp, build_ass
 from news_youtube_bot.config import Settings
 from news_youtube_bot.dedupe import dedupe_items
-from news_youtube_bot.footage import _title_matches_query, search_queries
+from news_youtube_bot.clip_gate import crop_short_side, gate_source
+from news_youtube_bot.footage import tags_match_query
+from news_youtube_bot.keywords import queries_for_line
 from news_youtube_bot.textutil import html_to_text, sentences
 from news_youtube_bot.history import StoryHistory
 from news_youtube_bot.models import NewsItem
@@ -190,18 +192,31 @@ def test_page_text_drops_json_ld_and_keeps_the_sentence():
     assert all("{" not in line for line in found)
 
 
-def test_clip_titles_have_to_match_the_search():
-    assert not _title_matches_query("File:Uranium Glazed Dish & DRSB-01.webm", "satellite dish")
-    assert not _title_matches_query("File:Hong Kong Police Clash with Protesters.webm", "city traffic night")
-    assert _title_matches_query("File:City at night.webm", "city traffic night")
-    assert _title_matches_query("File:Dell laptop keyboard mouse.webm", "computer keyboard")
+def test_stock_tags_have_to_match_the_search():
+    assert not tags_match_query("satellite dish", "Uranium Glazed Dish")
+    assert not tags_match_query("city traffic night", "Hong Kong Police Clash with Protesters")
+    assert tags_match_query("city traffic night", "City at night")
+    assert tags_match_query("computer keyboard", "Dell laptop keyboard mouse")
+    blocked, reason = gate_source(
+        width=1080,
+        height=1920,
+        duration=8,
+        title="Hong Kong Police Clash with Protesters",
+        url="https://example.com/protest.mp4",
+    )
+    assert not blocked
+    assert "off-limits" in reason
+    low, low_reason = gate_source(width=640, height=360, duration=10, title="server room")
+    assert not low
+    assert "720" in low_reason
+    assert crop_short_side(1080, 1920) >= 720
 
 
-def test_search_queries_vary_by_story():
-    first = search_queries("NVIDIA ships a quieter data center GPU", salt=1)
-    second = search_queries("NVIDIA ships a quieter data center GPU", salt=4)
-    assert first[0].lower().startswith("nvidia")
-    assert first != second
+def test_line_queries_name_the_product_and_place():
+    queries = queries_for_line("NVIDIA shipped a quieter fan for its data-center GPUs.")
+    blob = " ".join(queries).lower()
+    assert "nvidia" in blob
+    assert "data center" in blob or "fan" in blob
 
 
 def test_default_settings_are_five_vertical_shorts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -225,6 +240,10 @@ def test_default_settings_are_five_vertical_shorts(monkeypatch: pytest.MonkeyPat
         "GOOGLE_API_KEY",
         "PEXELS_API_KEY",
         "PIXABAY_API_KEY",
+        "XAI_API_KEY",
+        "XAI_VIDEO_MODEL",
+        "MAX_AI_CLIPS_PER_DAY",
+        "CLIP_REUSE_DAYS",
     ):
         monkeypatch.delenv(name, raising=False)
     settings = Settings.load(tmp_path)
@@ -238,3 +257,7 @@ def test_default_settings_are_five_vertical_shorts(monkeypatch: pytest.MonkeyPat
     assert settings.upload_quota_cost == 1600
     assert settings.youtube_daily_quota_units == 10000
     assert settings.llm_provider == "local"
+    assert settings.xai_api_key is None
+    assert settings.xai_video_model == "grok-imagine-video-1.5"
+    assert settings.max_ai_clips_per_day == 10
+    assert settings.clip_reuse_days == 7

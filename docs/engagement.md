@@ -12,17 +12,17 @@ Jenny Hoyos, talking with YouTube's Shorts product lead in January 2025, put the
 
 YouTube's own Shorts clip tool burns in captions and lets a creator restyle them. That is the pattern this project follows: words on screen, timed to the voice, with the active word marked, placed in the middle of the frame with side margins so the like column and the bottom title don't cover them.
 
-Cuts are a craft choice, not a number YouTube published. Their retention guidance says to keep curiosity going and to vary the edit. The renderer hard-cuts every few seconds, punches in, and changes the shot, because a single slow zoom on one photo gives people nothing new to look at. That is also the failure mode YouTube names in its monetization rules: image slideshows and videos that feel like the same template.
+Cuts are a craft choice, not a number YouTube published. Their retention guidance says to keep curiosity going and to vary the edit. The renderer hard-cuts to a new moving shot about every two or three seconds, on a word boundary, because a slow zoom on one photo gives people nothing new to look at. That is also the failure mode YouTube names in its monetization rules: image slideshows and videos that feel like the same template.
 
 ## What the pipeline does with that
 
 | Finding | Where it shows up |
 | --- | --- |
-| Hook in the first 1–2 seconds, no greeting | The script prompt and the offline writer both start with a short line. A kinetic title sits on the opening shot for about two seconds. Banned: "welcome back", "let's dive in", "you won't believe". |
+| Hook in the first 1–2 seconds, no greeting | The script prompt and the offline writer both start with a short line. The hook sits as on-screen text over the first moving shot for about two seconds. Banned: "welcome back", "let's dive in", "you won't believe". |
 | One idea, then a payoff | One story per video. The last card is a payoff line, and the spoken close points at the source instead of begging for a like. |
 | About 30–60 seconds, vertical 1080×1920 | Scripts are held to roughly 95–140 words. The frame is 1080×1920. Default batch is 5, not 30, so each one can be watched before it goes up. |
 | Words on screen, current word marked | Edge TTS returns word timings. Those become burned-in captions. OpenAI TTS estimates timings from the audio length. |
-| Motion, not a slideshow | Each Short pulls real clips (Pexels, Pixabay, or Wikimedia Commons), pans or punch-zooms them, can show the source page, and cuts. A moving type card is the fallback when a search returns nothing, and the log says so. |
+| Motion, not a slideshow | Each beat searches Pexels and Pixabay for real video, then optionally asks xAI Grok Imagine for a photoreal clip. Shots are hard cuts of moving footage, center-cropped, with no Ken Burns pan over a photo. A lead image can appear once as a small inset. If the voice cannot be covered with video, the Short is rejected with a reason. |
 | A bed under the voice | A generated music bed ducks while someone is speaking. Drop your own licensed tracks in `assets/music` and those are used instead. |
 | Same channel, different videos | Eight profiles rotate hook shape, sentence shape, voice, rate, caption color, music, and pacing. Five videos in a day do not share a profile. |
 | A person still decides | Renders land in `output/review/pending`. Upload runs only on approved files, and only up to the daily cap. Skipping review is `SKIP_REVIEW=1` together with `AUTO_UPLOAD=1`. |

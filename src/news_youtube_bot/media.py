@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -42,6 +43,43 @@ def ffprobe_duration(path: Path) -> float:
     ]
     out = subprocess.check_output(cmd, text=True).strip()
     return max(float(out), 0.1)
+
+
+def ffprobe_video(path: Path) -> tuple[int, int, float] | None:
+    """Return width, height, and duration for the first video stream."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height:format=duration",
+        "-of",
+        "json",
+        str(path),
+    ]
+    try:
+        raw = subprocess.check_output(cmd, text=True)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    streams = payload.get("streams") or []
+    if not streams:
+        return None
+    stream = streams[0]
+    try:
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        duration = float((payload.get("format") or {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0 or duration <= 0:
+        return None
+    return width, height, duration
 
 
 def has_video_stream(path: Path) -> bool:

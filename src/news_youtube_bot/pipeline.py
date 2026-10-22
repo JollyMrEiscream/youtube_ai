@@ -3,16 +3,17 @@ from __future__ import annotations
 import logging
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from openai import OpenAI
 
-from news_youtube_bot.article import capture_page, download_file, excerpt_from_html, fetch_page, og_image_url
+from news_youtube_bot.article import download_file, excerpt_from_html, fetch_page, og_image_url
 from news_youtube_bot.config import Settings, active_llm_provider, load_feed_urls
 from news_youtube_bot.dedupe import dedupe_items
-from news_youtube_bot.footage import collect_clips
+from news_youtube_bot.footage import FootageRejected, VisualShot, assemble_footage, log_footage_keys
 from news_youtube_bot.history import StoryHistory
 from news_youtube_bot.hn_ingest import fetch_hacker_news
 from news_youtube_bot.llm_gemini import build_script_gemini, rank_stories_gemini
@@ -90,9 +91,16 @@ def _script(settings: Settings, provider: str, item: NewsItem, profile: Profile,
     return build_script_local(item, profile, excerpt)
 
 
+@dataclass
+class RenderOutcome:
+    item_id: str
+    status: str
+    retryable: bool
+
+
 def _description(meta: dict, item: NewsItem, credits: list[str], music_credit: str) -> str:
     base = str(meta.get("description") or "").strip()
-    footage = "\n".join(f"- {credit}" for credit in credits) or "- Motion graphics only (no stock clip matched)."
+    footage = "\n".join(f"- {credit}" for credit in credits) or "- No footage matched."
     text = (
         f"{base}\n\n"
         f"Source: {item.title}\n{item.link}\n\n"
@@ -105,6 +113,81 @@ def _description(meta: dict, item: NewsItem, credits: list[str], music_credit: s
     return text[:4900]
 
 
+def _tags(meta: dict, settings: Settings) -> list[str]:
+    tags: list[str] = []
+    for tag in list(meta.get("tags") or []) + settings.default_tags + ["shorts"]:
+        text = str(tag).strip()
+        if text and text.lower() not in {existing.lower() for existing in tags}:
+            tags.append(text)
+    return tags[:30]
+
+
+def _lead_image(settings: Settings, page: str | None, folder: Path) -> Path | None:
+    if not settings.capture_sources or not page:
+        return None
+    image_url = og_image_url(page)
+    if not image_url:
+        return None
+    suffix = Path(urlparse(image_url).path).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        suffix = ".jpg"
+    image_path = folder / f"source-image{suffix}"
+    if download_file(image_url, image_path, settings.fetch_timeout_seconds, max_bytes=4_000_000):
+        return image_path
+    return None
+
+
+def _record(
+    settings: Settings,
+    item: NewsItem,
+    profile: Profile,
+    meta: dict,
+    script: str,
+    item_id: str,
+    when: datetime,
+    *,
+    status: str,
+    duration: float,
+    credits: list[str],
+    music_credit: str,
+    shots: list[VisualShot],
+    pip: bool,
+    reason: str,
+) -> dict:
+    return {
+        "id": item_id,
+        "status": status,
+        "title": str(meta.get("video_title") or item.title)[:100],
+        "description": _description(meta, item, credits, music_credit),
+        "tags": _tags(meta, settings),
+        "story_url": item.link,
+        "story_title": item.title,
+        "feed_name": item.feed_name,
+        "profile": profile.id,
+        "voice": profile.edge_voice if settings.tts_engine != "openai" else profile.openai_voice,
+        "created_at": when.isoformat(),
+        "duration_sec": round(duration, 2),
+        "word_count": word_count(script),
+        "clips": len(shots),
+        "credits": credits,
+        "music": music_credit,
+        "pip_lead_image": pip,
+        "still_runtime_sec": 0,
+        "shots": [
+            {
+                "source": shot.source,
+                "query": shot.query,
+                "in_point": round(shot.in_point, 3),
+                "duration": round(shot.duration, 3),
+                "credit": shot.credit,
+            }
+            for shot in shots
+        ],
+        "queue_reason": reason,
+        "youtube_id": "",
+    }
+
+
 def _render_one(
     settings: Settings,
     project_root: Path,
@@ -113,9 +196,8 @@ def _render_one(
     profile: Profile,
     provider: str,
     index: int,
-    used_urls: set[str],
     when: datetime,
-) -> str:
+) -> RenderOutcome:
     page = fetch_page(item.link, settings.fetch_timeout_seconds)
     excerpt = excerpt_from_html(page)
     meta = _script(settings, provider, item, profile, excerpt)
@@ -144,23 +226,48 @@ def _render_one(
                 "The script is probably padded with page junk."
             )
         queries = meta.get("broll_queries") if isinstance(meta.get("broll_queries"), list) else []
-        clips = collect_clips(settings, item, [str(q) for q in queries], used_urls, limit=3)
-        stills: list[Path] = []
-        credits = [clip.credit for clip in clips]
-        if settings.capture_sources:
-            shot = folder / "source-page.png"
-            if capture_page(item.link, shot, max(settings.fetch_timeout_seconds, 25)):
-                stills.append(shot)
-                credits.append(f"Screen capture of the source page ({item.link}). Review it before upload.")
-            image_url = og_image_url(page) if page else None
-            if image_url:
-                suffix = Path(urlparse(image_url).path).suffix.lower()
-                if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-                    suffix = ".jpg"
-                image_path = folder / f"source-image{suffix}"
-                if download_file(image_url, image_path, settings.fetch_timeout_seconds, max_bytes=4_000_000):
-                    stills.append(image_path)
-                    credits.append("Lead image embedded on the source page. Review it before upload.")
+        try:
+            shots = assemble_footage(
+                settings,
+                script=script,
+                words=words,
+                voice_seconds=voice_seconds,
+                story_title=item.title,
+                story_id=item_id,
+                extra_queries=[str(query) for query in queries],
+                when=when,
+            )
+        except FootageRejected as exc:
+            logger.error("Footage rejected for %s: %s", item_id, exc.reason)
+            record = _record(
+                settings,
+                item,
+                profile,
+                meta,
+                script,
+                item_id,
+                when,
+                status="rejected",
+                duration=voice_seconds,
+                credits=[],
+                music_credit="Not mixed. Rejected before a picture was cut.",
+                shots=[],
+                pip=False,
+                reason=exc.reason,
+            )
+            queue.write_meta(folder, record)
+            queue.transition(item_id, "rejected", queue_reason=exc.reason)
+            return RenderOutcome(item_id, "rejected", exc.retryable)
+        pip = _lead_image(settings, page, folder)
+        credits: list[str] = []
+        for shot in shots:
+            if shot.credit not in credits:
+                credits.append(shot.credit)
+        if pip is not None:
+            credits.append(
+                "Source-page lead image, shown once as a small inset over moving footage. "
+                "Review it before upload."
+            )
         music_path, music_credit = prepare_bed(
             folder / "bed.wav",
             voice_seconds + 0.3,
@@ -174,8 +281,8 @@ def _render_one(
             voice=voice,
             words=words,
             music=music_path,
-            clips=[clip.path for clip in clips],
-            stills=stills,
+            shots=shots,
+            pip=pip,
             hook_text=str(meta.get("hook_text") or item.title),
             payoff_text=str(meta.get("payoff_text") or "Read the source"),
             out_path=out,
@@ -187,37 +294,28 @@ def _render_one(
             preset=settings.video_preset,
             crf=settings.video_crf,
         )
-        tags = []
-        for tag in list(meta.get("tags") or []) + settings.default_tags + ["shorts"]:
-            text = str(tag).strip()
-            if text and text.lower() not in {existing.lower() for existing in tags}:
-                tags.append(text)
-        record = {
-            "id": item_id,
-            "status": "pending",
-            "title": str(meta.get("video_title") or item.title)[:100],
-            "description": _description(meta, item, credits, music_credit),
-            "tags": tags[:30],
-            "story_url": item.link,
-            "story_title": item.title,
-            "feed_name": item.feed_name,
-            "profile": profile.id,
-            "voice": profile.edge_voice if settings.tts_engine != "openai" else profile.openai_voice,
-            "created_at": when.isoformat(),
-            "duration_sec": round(duration, 2),
-            "word_count": word_count(script),
-            "clips": len(clips),
-            "credits": credits,
-            "music": music_credit,
-            "queue_reason": "",
-            "youtube_id": "",
-        }
+        record = _record(
+            settings,
+            item,
+            profile,
+            meta,
+            script,
+            item_id,
+            when,
+            status="pending",
+            duration=duration,
+            credits=credits,
+            music_credit=music_credit,
+            shots=shots,
+            pip=pip is not None,
+            reason="",
+        )
         queue.write_meta(folder, record)
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
-    logger.info("READY for review: %s (%s, %.0fs)", out, profile.id, duration)
-    return item_id
+    logger.info("READY for review: %s (%s, %.0fs, %d shots)", out, profile.id, duration, len(shots))
+    return RenderOutcome(item_id, "pending", False)
 
 
 def run(project_root: Path, settings: Settings) -> int:
@@ -232,6 +330,7 @@ def run(project_root: Path, settings: Settings) -> int:
         )
     else:
         logger.info("LLM provider: %s", provider)
+    log_footage_keys(settings)
 
     items = _gather(settings, project_root)
     history = StoryHistory(settings.data_dir / "seen.sqlite")
@@ -247,12 +346,11 @@ def run(project_root: Path, settings: Settings) -> int:
         when = datetime.now(timezone.utc)
         profiles = assign_profiles(len(selected), when.strftime("%Y-%m-%d"))
         queue = ReviewQueue(settings.output_dir / "review")
-        used_urls: set[str] = set()
         made: list[str] = []
         for index, (item, profile) in enumerate(zip(selected, profiles), start=1):
             logger.info("Rendering %d/%d: %s", index, len(selected), item.title[:100])
             try:
-                item_id = _render_one(
+                outcome = _render_one(
                     settings,
                     project_root,
                     queue,
@@ -260,17 +358,21 @@ def run(project_root: Path, settings: Settings) -> int:
                     profile,
                     provider,
                     index,
-                    used_urls,
                     when,
                 )
             except Exception:
                 logger.exception("Failed to render %s", item.title[:100])
                 continue
-            history.mark_used(item, when)
-            made.append(item_id)
+            if outcome.status == "pending" or not outcome.retryable:
+                history.mark_used(item, when)
+            if outcome.status == "pending":
+                made.append(outcome.item_id)
         queue.write_index()
         if not made:
-            logger.error("Every story failed to render")
+            logger.error(
+                "No Short was left pending. Rejections, with reasons, are in %s",
+                queue.root / "rejected",
+            )
             return 1
         mode = decide_upload(settings.auto_upload, settings.skip_review, settings.dry_run)
         if mode == "upload_without_review":

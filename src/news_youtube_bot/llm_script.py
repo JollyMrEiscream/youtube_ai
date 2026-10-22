@@ -30,7 +30,7 @@ Respond with JSON only:
   "tags": ["lowercase", "topical"],
   "hook_text": "on-screen hook, 4 to 8 words, sentence case",
   "payoff_text": "on-screen payoff, 2 to 6 words",
-  "broll_queries": ["three short stock-footage searches, concrete and visual"]
+  "broll_queries": ["three stock-video searches a camera can film: a device, a place, or an action"]
 }"""
 
 

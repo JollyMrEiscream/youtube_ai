@@ -59,6 +59,10 @@ jobs:
           CAPTURE_SOURCES: ${{ vars.CAPTURE_SOURCES }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          XAI_VIDEO_MODEL: ${{ vars.XAI_VIDEO_MODEL }}
+          MAX_AI_CLIPS_PER_DAY: ${{ vars.MAX_AI_CLIPS_PER_DAY }}
+          CLIP_REUSE_DAYS: ${{ vars.CLIP_REUSE_DAYS }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
           YOUTUBE_CATEGORY_ID: ${{ vars.YOUTUBE_CATEGORY_ID }}

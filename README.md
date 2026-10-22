@@ -29,7 +29,7 @@ Thirty, if you mean it:
 python -m news_youtube_bot run --count 30
 ```
 
-No API key is required for that command. Without a key the script is written from the headline and the article text, the voice is Microsoft Edge neural TTS, and the footage comes from Wikimedia Commons (plus a screenshot of the source page when Chrome is installed). A Gemini or OpenAI key makes the script tighter. A Pexels or Pixabay key adds a larger licensed clip library. The run logs which path it took.
+The script and the voice do not need a key: the offline writer uses the headline and the article text, and the voice is Microsoft Edge neural TTS. The picture does. Without `PEXELS_API_KEY`, `PIXABAY_API_KEY`, or `XAI_API_KEY` the run logs the missing keys and parks the Short in the review queue as rejected, with the reason, instead of building a slideshow. A Gemini or OpenAI key makes the script tighter. The run logs which path it took.
 
 PowerShell equivalents of the env vars below use `$env:NAME = "value"`.
 
@@ -66,10 +66,10 @@ YouTube's monetization rules (July 2025, "inauthentic content") refuse channels 
 3. **Picking.** With a model key, the model ranks for a one-minute tech Short and avoids two clips about the same event. Without a key, a local rank prefers recent tech-flagged items and will not take five stories from one outlet when others exist.
 4. **Script.** Eight profiles (question, claim, story, stakes, skeptic, briefing, one number, so-what) change the open, the shape, the voice, the pace, the caption color, and the music. The spoken target is about 95–140 words. The first sentence is the hook. The close points at the source. The model is told not to invent facts that are not in the article.
 5. **Voice.** Edge neural voices by default, a different voice and rate per profile, with word timings for captions. `TTS_ENGINE=openai` uses `TTS_MODEL` (default `tts-1-hd`).
-6. **Picture.** 1080×1920. Real clips from Pexels, then Pixabay, then Wikimedia Commons, cropped and moved (pan, drift, punch-in). Optional screenshot and lead image of the source page. Hard cuts every few seconds. A kinetic card carries the hook and the payoff. Captions highlight the current word. A music bed ducks under the voice.
-7. **Credits and disclosure.** The description lists the story URL, clip credits, and the music source, and says the voice is synthetic. The upload sets YouTube's synthetic-media flag when the API accepts it.
+6. **Picture.** 1080×1920, hard-cut from real video. Each spoken beat (about 2–3 seconds, on a word boundary) gets its own stock-video search: Pexels Videos, then Pixabay Videos, using keywords from that line (product, company, place, action). Clips have to survive a 9:16 crop at 720p or better. The strongest 1.5–3 seconds is what gets used. There is no Ken Burns pass over a photo, and Wikimedia is not a footage source. If stock has nothing usable, xAI Grok Imagine (`grok-imagine-video-1.5`, 9:16, 720p, silent) can generate a short photoreal clip, up to `MAX_AI_CLIPS_PER_DAY`. A clip used in one Short is not reused for a week. The article's lead image may appear once as a small inset over moving footage, and stills never fill the frame. If moving video cannot cover the voice, the Short is rejected with a reason instead of shipped as a slideshow. Captions highlight the current word. A music bed ducks under the voice.
+7. **Credits and disclosure.** The description lists the story URL, each clip's Pexels or Pixabay credit (or the Grok model, for a generated shot), and the music source, and says the voice is synthetic. The same credits are stored on the review record. The upload sets YouTube's synthetic-media flag when the API accepts it.
 
-Page screenshots and lead images can include copyrighted photos. They are in the cut so the Short shows the actual story, and they are why the review step exists. Prefer Pexels or Pixabay when you have a key. Wikimedia files are filtered toward free licenses, and the Commons credit is written into the description.
+The lead image can include a copyrighted photo, which is why it is an inset and why the review step exists. Footage is only Pexels, Pixabay, or a clip this tool generated. It does not download YouTube or news-site video.
 
 ## Keys
 
@@ -79,8 +79,9 @@ Copy `.env.example` to `.env`. The loader fills in anything not already exported
 | --- | --- | --- |
 | `GEMINI_API_KEY` | No | Ranking and scripts. Free tier in [Google AI Studio](https://aistudio.google.com/apikey). `GOOGLE_API_KEY` is also accepted. |
 | `OPENAI_API_KEY` | No | Same, if `LLM_PROVIDER=openai`. Also required for `TTS_ENGINE=openai`. |
-| `PEXELS_API_KEY` | No | Stock video. Free key from [Pexels](https://www.pexels.com/api/). As of this writing, Pexels has paused issuing new keys. Wikimedia covers the gap. |
-| `PIXABAY_API_KEY` | No | Stock video. Free key on [Pixabay's API page](https://pixabay.com/api/docs/) when you are logged in. |
+| `PEXELS_API_KEY` | For stock video | [Pexels API](https://www.pexels.com/api/). Free for the videos their license allows. As of this writing, Pexels has paused issuing new keys. |
+| `PIXABAY_API_KEY` | For stock video | [Pixabay API](https://pixabay.com/api/docs/), issued when you are logged in. Videos are used under Pixabay's license. |
+| `XAI_API_KEY` | For generated b-roll | [xAI console](https://console.x.ai/). Used only when stock search misses a beat. Model defaults to `grok-imagine-video-1.5` ([video generation docs](https://docs.x.ai/developers/model-capabilities/video/generation)). |
 | `NEWS_API_KEY` | No | Extra headlines from [NewsAPI](https://newsapi.org/). Their free plan is for development, not production. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` | Only to upload | YouTube Data API OAuth. See below. |
 
@@ -138,9 +139,9 @@ GitHub Actions:
 
 Actions cache is best-effort and can be evicted. If the cache misses, the upload workflow has nothing to send. For a channel you care about, run cron on a machine you control. The old hourly digest workflow is gone.
 
-Repository secrets: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `NEWS_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`, optional `RSS_FEED_URLS` (one URL per line).
+Repository secrets: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, `XAI_API_KEY`, `NEWS_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN`, optional `RSS_FEED_URLS` (one URL per line).
 
-Repository variables worth setting: `DAILY_SHORTS`, `LLM_PROVIDER`, `TTS_ENGINE`, `DRY_RUN`, `AUTO_UPLOAD`, `SKIP_REVIEW`, `MAX_UPLOADS_PER_DAY`. Empty variables fall through to the defaults in the app.
+Repository variables worth setting: `DAILY_SHORTS`, `LLM_PROVIDER`, `TTS_ENGINE`, `DRY_RUN`, `AUTO_UPLOAD`, `SKIP_REVIEW`, `MAX_UPLOADS_PER_DAY`, `MAX_AI_CLIPS_PER_DAY`, `XAI_VIDEO_MODEL`. Empty variables fall through to the defaults in the app.
 
 ## Cost
 
@@ -148,15 +149,16 @@ Figures are estimates for a ~700-character voiceover and a short script call. Ch
 
 | Piece | 1 Short | 5 / day | 30 / day |
 | --- | --- | --- | --- |
-| Edge TTS + Wikimedia or Pexels/Pixabay | $0 | $0 | $0 |
+| Edge TTS + Pexels or Pixabay video | $0 | $0 | $0 |
 | Gemini Flash script and rank, free tier | $0 within the free quota | $0 for a personal day | May hit free-tier rate limits; paid Flash is still well under a cent a Short |
 | OpenAI `gpt-4o-mini` script and rank | well under $0.01 | a few cents | still a few cents |
 | OpenAI TTS `tts-1` (~$15 / 1M chars) | ~$0.01 | ~$0.05 | ~$0.30 |
 | OpenAI TTS `tts-1-hd` (~$30 / 1M chars) | ~$0.02 | ~$0.10 | ~$0.60 |
+| xAI Grok Imagine video, about 4s requested then trimmed | Check [xAI pricing](https://docs.x.ai/developers/models/grok-imagine-video). `grok-imagine-video` is listed around $0.05/second; `grok-imagine-video-1.5` may differ. A 4s clip is on the order of $0.20 if that rate holds. | Up to `MAX_AI_CLIPS_PER_DAY` (default 10), so a few dollars if every clip is generated. Stock misses should be rare once a video key is set. | Raise the cap only if you mean to pay for it. 30 fully generated Shorts is a large bill. |
 | YouTube Data API | $0 inside the quota above | 5 uploads fit the default cap of 6 | 30 does not fit a 1,600-unit insert; the rest queue |
 | GitHub-hosted minutes | a few minutes of render | modest | a 30-video day is a long Actions job |
 
-The free stack (no key, or Gemini free tier + Edge + Wikimedia) is the one this repo runs out of the box. OpenAI HD voice is the main line item if you turn it on. Render time is CPU, not an API bill: one Short is typically a couple of minutes once clips are downloaded.
+Edge TTS plus a Pexels or Pixabay key is the cheap picture path. Grok is the paid fallback, capped by `MAX_AI_CLIPS_PER_DAY`. OpenAI HD voice is the other line item if you turn it on. Render time is CPU, not an API bill: one Short is typically a couple of minutes once clips are downloaded. Generated clips are cached under `data/cache/clips/`, and the daily counter is `data/ai_clip_budget.json`.
 
 Pricing pages: [OpenAI](https://platform.openai.com/docs/pricing), [Gemini](https://ai.google.dev/gemini-api/docs/pricing).
 
@@ -170,7 +172,9 @@ Pricing pages: [OpenAI](https://platform.openai.com/docs/pricing), [Gemini](http
 | `output/review/uploaded/` | Sent, with the YouTube id in `meta.json` |
 | `data/seen.sqlite` | Stories already used |
 | `data/quota.json` | Uploads counted against today's Pacific quota day |
-| `data/cache/clips/` | Downloaded footage |
+| `data/cache/clips/` | Downloaded and generated footage |
+| `data/used_clips.json` | Clip ids used in the last week |
+| `data/ai_clip_budget.json` | Grok clips counted for today |
 | `assets/music/` | Optional licensed tracks. Empty means a generated bed |
 | `config/feeds.yaml` | RSS list |
 
@@ -185,10 +189,11 @@ pytest
 
 ## What is still yours to provide
 
-The sample in this pull request was rendered with **no** `GEMINI_API_KEY`, `OPENAI_API_KEY`, `PEXELS_API_KEY`, `PIXABAY_API_KEY`, or YouTube OAuth, because none of those are in this environment. To get the quality path and real uploads, add:
+This environment has no `PEXELS_API_KEY`, `PIXABAY_API_KEY`, or `XAI_API_KEY`, so a real stock or Grok Short was not rendered here. `pytest` covers those APIs with mocked responses. To get a picture that is real video, add:
 
+- `PEXELS_API_KEY` or `PIXABAY_API_KEY` so beats are cut from stock video. Without one of these, or `XAI_API_KEY`, the Short is rejected instead of rendered
+- `XAI_API_KEY` if you want Grok to cover beats that stock search misses. Optional once a stock key is set. Raise `MAX_AI_CLIPS_PER_DAY` if a day needs more than 10 generated shots
 - `GEMINI_API_KEY` (or `OPENAI_API_KEY`) so scripts stop using the offline writer
-- `PEXELS_API_KEY` or `PIXABAY_API_KEY` if you want that library instead of only Wikimedia
 - The three YouTube OAuth values before `upload` will succeed
 
-Until those exist, `python -m news_youtube_bot run --count 1` still produces a reviewable Short.
+Until a footage key exists, `python -m news_youtube_bot run --count 1` still writes the script and the voice, then leaves a rejected review record that names the missing keys. It does not upload, and it does not make a slideshow.

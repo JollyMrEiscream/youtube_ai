@@ -106,7 +106,7 @@ class ReviewQueue:
             duration = item.meta.get("duration_sec") or ""
             profile = item.meta.get("profile") or ""
             reason = item.meta.get("queue_reason") or ""
-            suffix = f" ({reason})" if reason and item.status == "approved" else ""
+            suffix = f" ({reason})" if reason and item.status in {"approved", "rejected"} else ""
             lines.append(f"| {item.status} | `{item.id}` | {duration} | {profile} | {title}{suffix} |")
         lines.append("")
         path = self.root / "INDEX.md"
