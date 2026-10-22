@@ -36,6 +36,15 @@ from news_youtube_bot.window_filter import filter_by_window
 
 logger = logging.getLogger(__name__)
 
+XAI_CHAT_BASE = "https://api.x.ai/v1"
+
+
+def chat_client(settings: Settings) -> OpenAI:
+    """OpenAI SDK. xAI speaks the same chat API at api.x.ai."""
+    if active_llm_provider(settings) == "xai":
+        return OpenAI(api_key=settings.xai_api_key, base_url=XAI_CHAT_BASE)
+    return OpenAI(api_key=settings.openai_api_key)
+
 
 def configure_logging() -> None:
     logging.basicConfig(
@@ -72,10 +81,14 @@ def _rank(settings: Settings, provider: str, items: list[NewsItem]) -> list[News
             logger.exception("Gemini ranking failed; using the offline editor")
     if provider == "openai" and settings.openai_api_key:
         try:
-            client = OpenAI(api_key=settings.openai_api_key)
-            return rank_stories(client, settings.openai_model, items, count)
+            return rank_stories(chat_client(settings), settings.openai_model, items, count)
         except Exception:
             logger.exception("OpenAI ranking failed; using the offline editor")
+    if provider == "xai" and settings.xai_api_key:
+        try:
+            return rank_stories(chat_client(settings), settings.xai_chat_model, items, count)
+        except Exception:
+            logger.exception("xAI ranking failed; using the offline editor")
     return select_stories(items, count)
 
 
@@ -84,8 +97,9 @@ def _script(settings: Settings, provider: str, item: NewsItem, profile: Profile,
         if provider == "gemini" and settings.gemini_api_key:
             return build_script_gemini(settings.gemini_api_key, settings.gemini_model, item, profile, excerpt)
         if provider == "openai" and settings.openai_api_key:
-            client = OpenAI(api_key=settings.openai_api_key)
-            return build_script(client, settings.openai_model, item, profile, excerpt)
+            return build_script(chat_client(settings), settings.openai_model, item, profile, excerpt)
+        if provider == "xai" and settings.xai_api_key:
+            return build_script(chat_client(settings), settings.xai_chat_model, item, profile, excerpt)
     except Exception:
         logger.exception("Script model failed for %s; using the offline writer", item.title[:80])
     return build_script_local(item, profile, excerpt)
@@ -326,7 +340,7 @@ def run(project_root: Path, settings: Settings) -> int:
     if provider == "local":
         logger.warning(
             "No LLM key set. Ranking and scripts use the offline writer. "
-            "Add GEMINI_API_KEY or OPENAI_API_KEY for tighter, more natural scripts."
+            "Add GEMINI_API_KEY, OPENAI_API_KEY, or XAI_API_KEY for tighter, more natural scripts."
         )
     else:
         logger.info("LLM provider: %s", provider)

@@ -68,7 +68,7 @@ def _truthy(name: str, default: bool = False) -> bool:
 
 def _resolve_llm_provider() -> str:
     explicit = _env_str("LLM_PROVIDER", "").lower()
-    if explicit in ("openai", "gemini", "local"):
+    if explicit in ("openai", "gemini", "xai", "local"):
         return explicit
     gemini = _first_opt_str("GEMINI_API_KEY", "GOOGLE_API_KEY")
     openai = _opt_str("OPENAI_API_KEY")
@@ -76,6 +76,8 @@ def _resolve_llm_provider() -> str:
         return "gemini"
     if openai:
         return "openai"
+    if _opt_str("XAI_API_KEY"):
+        return "xai"
     return "local"
 
 
@@ -93,11 +95,12 @@ class Settings:
     feeds_file: Path
     news_window_minutes: int
     daily_shorts: int
-    llm_provider: str  # openai | gemini | local
+    llm_provider: str  # openai | gemini | xai | local
     gemini_api_key: str | None
     gemini_model: str
     openai_api_key: str | None
     openai_model: str
+    xai_chat_model: str
     tts_engine: str  # openai | edge
     tts_voice: str
     tts_voice_explicit: bool
@@ -125,7 +128,9 @@ class Settings:
     xai_video_duration: int
     xai_poll_timeout: float
     max_ai_clips_per_day: int
+    max_ai_clips_per_short: int
     clip_reuse_days: int
+    stock_search_cache_hours: float
     news_api_key: str | None
     auto_upload: bool
     skip_review: bool
@@ -159,6 +164,7 @@ class Settings:
             gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash"),
             openai_api_key=_opt_str("OPENAI_API_KEY"),
             openai_model=_env_str("OPENAI_MODEL", "gpt-4o-mini"),
+            xai_chat_model=_env_str("XAI_MODEL", "grok-4.7"),
             tts_engine=_env_str("TTS_ENGINE", "edge").lower(),
             tts_voice=_env_str("TTS_VOICE", ""),
             tts_voice_explicit=_opt_str("TTS_VOICE") is not None,
@@ -186,14 +192,16 @@ class Settings:
             xai_video_duration=min(15, max(1, _env_int("XAI_VIDEO_DURATION", 4))),
             xai_poll_timeout=_env_float("XAI_POLL_TIMEOUT_SECONDS", 480),
             max_ai_clips_per_day=max(0, _env_int("MAX_AI_CLIPS_PER_DAY", 10)),
+            max_ai_clips_per_short=max(0, _env_int("MAX_AI_CLIPS_PER_SHORT", 3)),
             clip_reuse_days=max(1, _env_int("CLIP_REUSE_DAYS", 7)),
+            stock_search_cache_hours=max(0.0, _env_float("STOCK_SEARCH_CACHE_HOURS", 12)),
             news_api_key=_first_opt_str("NEWS_API_KEY", "NEWSAPI_KEY"),
             auto_upload=_truthy("AUTO_UPLOAD", False),
             skip_review=_truthy("SKIP_REVIEW", False),
             max_uploads_per_day=_env_int("MAX_UPLOADS_PER_DAY", 6),
             upload_quota_cost=_env_int("UPLOAD_QUOTA_COST", 1600),
             youtube_daily_quota_units=_env_int("YOUTUBE_DAILY_QUOTA_UNITS", 10000),
-            capture_sources=_truthy("CAPTURE_SOURCES", True),
+            capture_sources=_truthy("CAPTURE_SOURCES", False),
             music_dir=music_dir,
         )
 
@@ -205,12 +213,16 @@ def active_llm_provider(settings: Settings) -> str:
         return "gemini"
     if provider == "openai" and settings.openai_api_key:
         return "openai"
+    if provider == "xai" and settings.xai_api_key:
+        return "xai"
     if provider == "local":
         return "local"
     if settings.gemini_api_key:
         return "gemini"
     if settings.openai_api_key:
         return "openai"
+    if settings.xai_api_key:
+        return "xai"
     return "local"
 
 

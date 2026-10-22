@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from news_youtube_bot.captions import ass_timestamp, build_ass
-from news_youtube_bot.config import Settings
+from news_youtube_bot.config import Settings, active_llm_provider
+from news_youtube_bot.pipeline import chat_client
 from news_youtube_bot.dedupe import dedupe_items
 from news_youtube_bot.clip_gate import crop_short_side, gate_source
 from news_youtube_bot.footage import tags_match_query
@@ -242,8 +243,12 @@ def test_default_settings_are_five_vertical_shorts(monkeypatch: pytest.MonkeyPat
         "PIXABAY_API_KEY",
         "XAI_API_KEY",
         "XAI_VIDEO_MODEL",
+        "XAI_MODEL",
         "MAX_AI_CLIPS_PER_DAY",
+        "MAX_AI_CLIPS_PER_SHORT",
         "CLIP_REUSE_DAYS",
+        "CAPTURE_SOURCES",
+        "STOCK_SEARCH_CACHE_HOURS",
     ):
         monkeypatch.delenv(name, raising=False)
     settings = Settings.load(tmp_path)
@@ -259,5 +264,21 @@ def test_default_settings_are_five_vertical_shorts(monkeypatch: pytest.MonkeyPat
     assert settings.llm_provider == "local"
     assert settings.xai_api_key is None
     assert settings.xai_video_model == "grok-imagine-video-1.5"
+    assert settings.xai_chat_model == "grok-4.7"
     assert settings.max_ai_clips_per_day == 10
+    assert settings.max_ai_clips_per_short == 3
     assert settings.clip_reuse_days == 7
+    assert settings.capture_sources is False
+
+
+def test_xai_key_alone_selects_xai_for_scripts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    for name in ("LLM_PROVIDER", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "xai-test")
+    monkeypatch.setenv("XAI_MODEL", "grok-4.7")
+    settings = Settings.load(tmp_path)
+    assert settings.llm_provider == "xai"
+    assert active_llm_provider(settings) == "xai"
+    client = chat_client(settings)
+    assert "api.x.ai" in str(client.base_url)
+    assert str(client.base_url).rstrip("/").endswith("/v1")

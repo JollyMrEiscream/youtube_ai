@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
+from collections.abc import Callable
 
 import httpx
 
@@ -103,13 +103,21 @@ def generate_video_url(
     duration: int = 4,
     timeout: float = 480,
     client: httpx.Client | None = None,
+    on_accepted: Callable[[str], None] | None = None,
 ) -> str:
+    """Start a generation, then poll.
+
+    `on_accepted` runs once xAI has returned a request id, before polling.
+    The caller uses that to charge the daily budget even if polling later fails.
+    """
     own_client = client is None
     if client is None:
         client = make_client(api_key, timeout=min(60, timeout))
     try:
         request_id = request_video(client, prompt, model=model, duration=duration)
         logger.info("xAI video request %s (%s)", request_id, model)
+        if on_accepted is not None:
+            on_accepted(request_id)
         return poll_video(client, request_id, timeout=timeout)
     finally:
         if own_client:

@@ -11,6 +11,12 @@ on:
         default: "5"
         required: false
 
+# One run at a time. A second render or upload waits, so they cannot
+# clobber the saved state or upload the same Short twice.
+concurrency:
+  group: youtube-ai-shorts
+  cancel-in-progress: false
+
 jobs:
   render:
     runs-on: ubuntu-latest
@@ -31,12 +37,12 @@ jobs:
       # Cache is best-effort. A machine with a disk is the reliable way to keep
       # the review queue and the "already used" story list. See the README.
       - name: Restore story history and review queue
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             data
             output/review
-          key: shorts-state-${{ github.run_id }}
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             shorts-state-
 
@@ -62,6 +68,8 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           XAI_VIDEO_MODEL: ${{ vars.XAI_VIDEO_MODEL }}
           MAX_AI_CLIPS_PER_DAY: ${{ vars.MAX_AI_CLIPS_PER_DAY }}
+          MAX_AI_CLIPS_PER_SHORT: ${{ vars.MAX_AI_CLIPS_PER_SHORT }}
+          XAI_MODEL: ${{ vars.XAI_MODEL }}
           CLIP_REUSE_DAYS: ${{ vars.CLIP_REUSE_DAYS }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
           YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
@@ -79,6 +87,21 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           RSS_FEED_URLS: ${{ secrets.RSS_FEED_URLS }}
         run: python -m news_youtube_bot run
+
+      # restore does not save. This step runs even when the render fails,
+      # so today's Grok count, used clips, and the review queue are kept.
+      - name: Ensure state directories exist
+        if: always()
+        run: mkdir -p data output/review && touch data/.keep output/review/.keep
+
+      - name: Persist saved state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data
+            output/review
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload the review queue
         if: always()

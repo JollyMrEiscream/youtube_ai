@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
 
+# Shares a group with the daily render so the two cannot run at once.
+concurrency:
+  group: youtube-ai-shorts
+  cancel-in-progress: false
+
 jobs:
   upload:
     runs-on: ubuntu-latest
@@ -26,12 +31,12 @@ jobs:
         run: pip install -e .
 
       - name: Restore story history and review queue
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             data
             output/review
-          key: shorts-state-${{ github.run_id }}
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             shorts-state-
 
@@ -68,3 +73,16 @@ jobs:
           queue.write_index()
           PY
           python -m news_youtube_bot upload
+
+      - name: Ensure state directories exist
+        if: always()
+        run: mkdir -p data output/review && touch data/.keep output/review/.keep
+
+      - name: Persist saved state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data
+            output/review
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}

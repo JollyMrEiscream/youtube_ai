@@ -17,8 +17,17 @@ from news_youtube_bot.clip_gate import (
 )
 from news_youtube_bot.clip_memory import AiClipBudget, UsedClipStore
 from news_youtube_bot.config import Settings
-from news_youtube_bot.footage import FootageRejected, assemble_footage, search_pexels, search_pixabay
-from news_youtube_bot.grok_video import photoreal_prompt, poll_video, request_video
+from news_youtube_bot.footage import (
+    Candidate,
+    FootageRejected,
+    StockRateLimit,
+    _generate,
+    assemble_footage,
+    search_pexels,
+    search_pixabay,
+    search_stock,
+)
+from news_youtube_bot.grok_video import generate_video_url, photoreal_prompt, poll_video, request_video
 from news_youtube_bot.tts_render import estimate_word_timings
 from news_youtube_bot.video_render import cover_filter
 
@@ -259,3 +268,255 @@ def test_cover_filter_does_not_pan_or_zoom():
     assert "zoompan" not in filt
     assert "t/" not in filt
     assert "1080" in filt and "1920" in filt
+
+
+_PEXELS_HIT = {
+    "videos": [
+        {
+            "id": 11,
+            "duration": 12,
+            "url": "https://www.pexels.com/video/server-room-11/",
+            "user": {"name": "Ada"},
+            "video_files": [
+                {"file_type": "video/mp4", "width": 1080, "height": 1920, "link": "https://cdn.example/vert.mp4"},
+            ],
+        }
+    ]
+}
+
+
+def _when():
+    return datetime(2026, 10, 22, tzinfo=timezone.utc)
+
+
+def _words(seconds: float = 8.0):
+    script = "one two three four five six seven eight nine ten"
+    return script, estimate_word_timings(script, seconds)
+
+
+def test_pexels_retries_rate_limits_then_succeeds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("news_youtube_bot.footage._sleep", lambda _seconds: None)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json=_PEXELS_HIT)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        found = search_pexels("server room", "pexels-test", client)
+    assert calls["n"] == 3
+    assert [item.stable_id for item in found] == ["pexels:11"]
+
+
+def test_pexels_rate_limit_still_raises_after_retries(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("news_youtube_bot.footage._sleep", lambda _seconds: None)
+    calls = {"n": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, headers={"Retry-After": "0"}, json={"error": "rate limit"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(StockRateLimit) as exc:
+            search_pexels("server room", "pexels-test", client)
+    assert calls["n"] == 4
+    assert exc.value.provider == "pexels"
+
+
+def test_stock_search_results_are_cached(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "pexels-test")
+    settings = Settings.load(tmp_path)
+    calls = {"n": 0}
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_PEXELS_HIT)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        first = search_stock(settings, "server room", client)
+        second = search_stock(settings, "server room", client)
+    assert calls["n"] == 1
+    assert [item.stable_id for item in first] == ["pexels:11"]
+    assert [item.stable_id for item in second] == ["pexels:11"]
+
+
+def test_rate_limit_rejects_the_short_without_calling_grok(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test")
+    monkeypatch.setenv("MAX_AI_CLIPS_PER_DAY", "10")
+    settings = Settings.load(tmp_path)
+    settings.data_dir = tmp_path / "data"
+    called = {"n": 0}
+
+    def search(_settings, _query, client=None):
+        raise StockRateLimit("pexels", "server room")
+
+    def generate(*_args, **_kwargs):
+        called["n"] += 1
+        raise AssertionError("Grok must not run after a stock rate limit")
+
+    monkeypatch.setattr("news_youtube_bot.footage.search_stock", search)
+    monkeypatch.setattr("news_youtube_bot.footage._generate", generate)
+    script, words = _words()
+    with pytest.raises(FootageRejected) as exc:
+        assemble_footage(
+            settings,
+            script=script,
+            words=words,
+            voice_seconds=8,
+            story_title="server room",
+            story_id="rate-1",
+            extra_queries=[],
+            when=_when(),
+        )
+    assert called["n"] == 0
+    assert exc.value.retryable is True
+    assert "rate-limited" in exc.value.reason
+    assert "Grok" in exc.value.reason
+    assert AiClipBudget(settings.data_dir / "ai_clip_budget.json", "2026-10-22", 10).count == 0
+
+
+def test_short_is_rejected_before_any_grok_spend_when_the_cap_cannot_cover_it(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test")
+    monkeypatch.setenv("MAX_AI_CLIPS_PER_DAY", "10")
+    monkeypatch.setenv("MAX_AI_CLIPS_PER_SHORT", "1")
+    settings = Settings.load(tmp_path)
+    settings.data_dir = tmp_path / "data"
+    script, words = _words()
+    assert len(plan_beats(words, 8)) > 1
+    called = {"n": 0}
+
+    def generate(*_args, **_kwargs):
+        called["n"] += 1
+        raise AssertionError("budget check should happen before generation")
+
+    monkeypatch.setattr("news_youtube_bot.footage._generate", generate)
+    with pytest.raises(FootageRejected) as exc:
+        assemble_footage(
+            settings,
+            script=script,
+            words=words,
+            voice_seconds=8,
+            story_title="chip lab",
+            story_id="cap-1",
+            extra_queries=[],
+            when=_when(),
+        )
+    assert called["n"] == 0
+    assert "Nothing was requested" in exc.value.reason
+    assert "MAX_AI_CLIPS_PER_SHORT=1" in exc.value.reason
+    assert exc.value.retryable is True
+    assert AiClipBudget(settings.data_dir / "ai_clip_budget.json", "2026-10-22", 10).count == 0
+
+
+def test_grok_request_counts_as_soon_as_it_is_accepted_even_if_it_fails(tmp_path, monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "xai-test")
+    settings = Settings.load(tmp_path)
+    budget = AiClipBudget(tmp_path / "ai_clip_budget.json", "2026-10-22", 10)
+    memory = UsedClipStore(tmp_path / "used.json")
+
+    def boom(*_args, on_accepted=None, **_kwargs):
+        assert on_accepted is not None
+        on_accepted("req-timeout")
+        raise RuntimeError("timed out")
+
+    monkeypatch.setattr("news_youtube_bot.footage.generate_video_url", boom)
+    result = _generate(settings, "a spinning server fan", tmp_path, budget, set(), memory, date(2026, 10, 22))
+    assert result is None
+    assert budget.count == 1
+    assert AiClipBudget(tmp_path / "ai_clip_budget.json", "2026-10-22", 10).count == 1
+
+    def refused(*_args, on_accepted=None, **_kwargs):
+        raise RuntimeError("401")
+
+    fresh = AiClipBudget(tmp_path / "fresh.json", "2026-10-22", 10)
+    monkeypatch.setattr("news_youtube_bot.footage.generate_video_url", refused)
+    assert _generate(settings, "another fan", tmp_path, fresh, set(), memory, date(2026, 10, 22)) is None
+    assert fresh.count == 0
+
+
+def test_failed_poll_is_charged_only_after_accept():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"request_id": "req-9"})
+        return httpx.Response(200, json={"status": "failed", "error": "nope"})
+
+    seen: dict[str, str] = {}
+    with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://api.x.ai") as client:
+        with pytest.raises(RuntimeError):
+            generate_video_url(
+                "xai-test",
+                "prompt",
+                client=client,
+                on_accepted=lambda request_id: seen.setdefault("id", request_id),
+            )
+    assert seen["id"] == "req-9"
+
+
+def _clip(stable_id: str) -> Candidate:
+    return Candidate(
+        download_url=f"https://cdn.example/{stable_id}.mp4",
+        stable_id=stable_id,
+        credit=f"Video {stable_id}",
+        source="pexels",
+        width=1080,
+        height=1920,
+        duration=8,
+    )
+
+
+def test_stock_clips_are_marked_used_only_when_the_short_is_accepted(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("PEXELS_API_KEY", "pexels-test")
+    settings = Settings.load(tmp_path)
+    settings.data_dir = tmp_path / "data"
+    monkeypatch.setattr("news_youtube_bot.footage._accept", lambda *_args, **_kwargs: tmp_path / "clip.mp4")
+    monkeypatch.setattr("news_youtube_bot.footage.window_for", lambda _path, want: (0.2, want))
+    script, words = _words()
+    beats = plan_beats(words, 8)
+
+    handed = {"n": 0}
+
+    def one_then_empty(_settings, _query, client=None):
+        handed["n"] += 1
+        if handed["n"] == 1:
+            return [_clip("pexels:only")]
+        return []
+
+    monkeypatch.setattr("news_youtube_bot.footage.search_stock", one_then_empty)
+    with pytest.raises(FootageRejected):
+        assemble_footage(
+            settings,
+            script=script,
+            words=words,
+            voice_seconds=8,
+            story_title="partial",
+            story_id="partial-1",
+            extra_queries=[],
+            when=_when(),
+        )
+    assert not UsedClipStore(settings.data_dir / "used_clips.json").seen("pexels:only", date(2026, 10, 22))
+
+    seq = iter(range(1, 20))
+
+    def enough(_settings, _query, client=None):
+        return [_clip(f"pexels:{next(seq)}")]
+
+    monkeypatch.setattr("news_youtube_bot.footage.search_stock", enough)
+    shots = assemble_footage(
+        settings,
+        script=script,
+        words=words,
+        voice_seconds=8,
+        story_title="full",
+        story_id="full-1",
+        extra_queries=[],
+        when=_when(),
+    )
+    assert len(shots) == len(beats)
+    store = UsedClipStore(settings.data_dir / "used_clips.json")
+    for shot in shots:
+        assert store.seen(shot.stable_id, date(2026, 10, 22))
+    assert not store.seen("pexels:only", date(2026, 10, 22))
