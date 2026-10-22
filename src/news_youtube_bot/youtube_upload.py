@@ -69,26 +69,46 @@ def upload_video(
         "status": {
             "privacyStatus": settings.youtube_privacy,
             "selfDeclaredMadeForKids": False,
+            # The voiceover is synthetic. YouTube asks creators to disclose that.
+            "containsSyntheticMedia": True,
         },
     }
 
-    media = MediaFileUpload(
-        str(file_path),
-        chunksize=-1,
-        resumable=True,
-        mimetype="video/mp4",
-    )
-
-    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-    response = None
-    try:
+    def _send(upload_body: dict) -> dict:
+        media = MediaFileUpload(
+            str(file_path),
+            chunksize=-1,
+            resumable=True,
+            mimetype="video/mp4",
+        )
+        request = youtube.videos().insert(part="snippet,status", body=upload_body, media_body=media)
+        response = None
         while response is None:
             status, response = request.next_chunk()
             if status:
                 logger.info("Upload progress: %d%%", int(status.progress() * 100))
-    except HttpError as e:
-        logger.error("YouTube API error: %s", e)
-        raise
+        if not isinstance(response, dict):
+            raise RuntimeError(f"Unexpected upload response: {response!r}")
+        return response
+
+    try:
+        response = _send(body)
+    except HttpError as exc:
+        message = str(exc)
+        if "containsSyntheticMedia" in message and "status" in body:
+            logger.warning("YouTube rejected containsSyntheticMedia; retrying without that flag")
+            retry = dict(body)
+            status_body = dict(retry.get("status") or {})
+            status_body.pop("containsSyntheticMedia", None)
+            retry["status"] = status_body
+            try:
+                response = _send(retry)
+            except HttpError as retry_exc:
+                logger.error("YouTube API error: %s", retry_exc)
+                raise
+        else:
+            logger.error("YouTube API error: %s", exc)
+            raise
 
     video_id = response.get("id") if isinstance(response, dict) else None
     if not video_id:

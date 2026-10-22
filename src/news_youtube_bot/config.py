@@ -7,6 +7,21 @@ from pathlib import Path
 import yaml
 
 
+def load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE pairs without overriding variables already in the environment."""
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _env_str(name: str, default: str) -> str:
     """GitHub Actions often injects `VAR=` (empty) when a repo var is unset; treat as missing."""
     v = os.environ.get(name)
@@ -37,10 +52,10 @@ def _opt_str(name: str) -> str | None:
 
 
 def _first_opt_str(*names: str) -> str | None:
-    for n in names:
-        s = _opt_str(n)
-        if s is not None:
-            return s
+    for name in names:
+        found = _opt_str(name)
+        if found is not None:
+            return found
     return None
 
 
@@ -53,31 +68,51 @@ def _truthy(name: str, default: bool = False) -> bool:
 
 def _resolve_llm_provider() -> str:
     explicit = _env_str("LLM_PROVIDER", "").lower()
-    if explicit in ("openai", "gemini"):
+    if explicit in ("openai", "gemini", "xai", "local"):
         return explicit
     gemini = _first_opt_str("GEMINI_API_KEY", "GOOGLE_API_KEY")
     openai = _opt_str("OPENAI_API_KEY")
     if gemini and not openai:
         return "gemini"
-    return "openai"
+    if openai:
+        return "openai"
+    if _opt_str("XAI_API_KEY"):
+        return "xai"
+    return "local"
+
+
+def _daily_count() -> int:
+    if _opt_str("DAILY_SHORTS") is not None:
+        return _env_int("DAILY_SHORTS", 5)
+    # Older installs used MAX_STORIES as the batch size for one digest video.
+    if _opt_str("MAX_STORIES") is not None:
+        return _env_int("MAX_STORIES", 5)
+    return 5
 
 
 @dataclass
 class Settings:
     feeds_file: Path
     news_window_minutes: int
-    max_stories: int
-    llm_provider: str  # openai | gemini
+    daily_shorts: int
+    llm_provider: str  # openai | gemini | xai | local
     gemini_api_key: str | None
     gemini_model: str
     openai_api_key: str | None
     openai_model: str
+    xai_chat_model: str
     tts_engine: str  # openai | edge
     tts_voice: str
+    tts_voice_explicit: bool
+    tts_model: str
+    tts_rate: str | None
     video_width: int
     video_height: int
+    video_preset: str
+    video_crf: int
     dry_run: bool
     output_dir: Path
+    data_dir: Path
     youtube_privacy: str
     google_client_id: str | None
     google_client_secret: str | None
@@ -86,45 +121,109 @@ class Settings:
     default_tags: list[str]
     fetch_timeout_seconds: float
     rss_feed_urls: list[str] | None
+    pexels_api_key: str | None
+    pixabay_api_key: str | None
+    xai_api_key: str | None
+    xai_video_model: str
+    xai_video_duration: int
+    xai_poll_timeout: float
+    max_ai_clips_per_day: int
+    max_ai_clips_per_short: int
+    clip_reuse_days: int
+    stock_search_cache_hours: float
+    news_api_key: str | None
+    auto_upload: bool
+    skip_review: bool
+    max_uploads_per_day: int
+    upload_quota_cost: int
+    youtube_daily_quota_units: int
+    capture_sources: bool
+    music_dir: Path | None
 
     @classmethod
     def load(cls, project_root: Path | None = None) -> Settings:
         root = project_root or Path.cwd()
+        load_dotenv(root / ".env")
         feeds_path = Path(_env_str("FEEDS_FILE", str(root / "config" / "feeds.yaml")))
         raw_urls = os.environ.get("RSS_FEED_URLS")
         rss_list: list[str] | None = None
         if raw_urls and raw_urls.strip():
             rss_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
 
-        tags_raw = _env_str("YOUTUBE_TAGS", "news,summary,ai")
+        tags_raw = _env_str("YOUTUBE_TAGS", "tech,technology,shorts,news")
         tags = [t.strip() for t in tags_raw.split(",") if t.strip()]
-
-        out_dir = Path(_env_str("OUTPUT_DIR", str(root / "output")))
+        music_raw = _opt_str("MUSIC_DIR")
+        music_dir = Path(music_raw) if music_raw else (root / "assets" / "music")
 
         return cls(
             feeds_file=feeds_path,
-            news_window_minutes=_env_int("NEWS_WINDOW_MINUTES", 90),
-            max_stories=_env_int("MAX_STORIES", 5),
+            news_window_minutes=_env_int("NEWS_WINDOW_MINUTES", 36 * 60),
+            daily_shorts=max(1, _daily_count()),
             llm_provider=_resolve_llm_provider(),
             gemini_api_key=_first_opt_str("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-            gemini_model=_env_str("GEMINI_MODEL", "gemini-1.5-flash"),
+            gemini_model=_env_str("GEMINI_MODEL", "gemini-2.5-flash"),
             openai_api_key=_opt_str("OPENAI_API_KEY"),
             openai_model=_env_str("OPENAI_MODEL", "gpt-4o-mini"),
-            tts_engine=_env_str("TTS_ENGINE", "openai").lower(),
-            tts_voice=_env_str("TTS_VOICE", "alloy"),
-            video_width=_env_int("VIDEO_WIDTH", 1920),
-            video_height=_env_int("VIDEO_HEIGHT", 1080),
+            xai_chat_model=_env_str("XAI_MODEL", "grok-4.7"),
+            tts_engine=_env_str("TTS_ENGINE", "edge").lower(),
+            tts_voice=_env_str("TTS_VOICE", ""),
+            tts_voice_explicit=_opt_str("TTS_VOICE") is not None,
+            tts_model=_env_str("TTS_MODEL", "tts-1-hd"),
+            tts_rate=_opt_str("TTS_RATE"),
+            video_width=_env_int("VIDEO_WIDTH", 1080),
+            video_height=_env_int("VIDEO_HEIGHT", 1920),
+            video_preset=_env_str("VIDEO_PRESET", "medium"),
+            video_crf=_env_int("VIDEO_CRF", 20),
             dry_run=_truthy("DRY_RUN", False),
-            output_dir=out_dir,
+            output_dir=Path(_env_str("OUTPUT_DIR", str(root / "output"))),
+            data_dir=Path(_env_str("DATA_DIR", str(root / "data"))),
             youtube_privacy=_env_str("YOUTUBE_PRIVACY", "private").lower(),
             google_client_id=_opt_str("GOOGLE_CLIENT_ID"),
             google_client_secret=_opt_str("GOOGLE_CLIENT_SECRET"),
             youtube_refresh_token=_opt_str("YOUTUBE_REFRESH_TOKEN"),
-            youtube_category_id=_env_str("YOUTUBE_CATEGORY_ID", "25"),  # News & Politics
+            youtube_category_id=_env_str("YOUTUBE_CATEGORY_ID", "28"),  # Science & Technology
             default_tags=tags,
             fetch_timeout_seconds=_env_float("FETCH_TIMEOUT_SECONDS", 20.0),
             rss_feed_urls=rss_list,
+            pexels_api_key=_opt_str("PEXELS_API_KEY"),
+            pixabay_api_key=_opt_str("PIXABAY_API_KEY"),
+            xai_api_key=_opt_str("XAI_API_KEY"),
+            xai_video_model=_env_str("XAI_VIDEO_MODEL", "grok-imagine-video-1.5"),
+            xai_video_duration=min(15, max(1, _env_int("XAI_VIDEO_DURATION", 4))),
+            xai_poll_timeout=_env_float("XAI_POLL_TIMEOUT_SECONDS", 480),
+            max_ai_clips_per_day=max(0, _env_int("MAX_AI_CLIPS_PER_DAY", 10)),
+            max_ai_clips_per_short=max(0, _env_int("MAX_AI_CLIPS_PER_SHORT", 3)),
+            clip_reuse_days=max(1, _env_int("CLIP_REUSE_DAYS", 7)),
+            stock_search_cache_hours=max(0.0, _env_float("STOCK_SEARCH_CACHE_HOURS", 12)),
+            news_api_key=_first_opt_str("NEWS_API_KEY", "NEWSAPI_KEY"),
+            auto_upload=_truthy("AUTO_UPLOAD", False),
+            skip_review=_truthy("SKIP_REVIEW", False),
+            max_uploads_per_day=_env_int("MAX_UPLOADS_PER_DAY", 6),
+            upload_quota_cost=_env_int("UPLOAD_QUOTA_COST", 1600),
+            youtube_daily_quota_units=_env_int("YOUTUBE_DAILY_QUOTA_UNITS", 10000),
+            capture_sources=_truthy("CAPTURE_SOURCES", False),
+            music_dir=music_dir,
         )
+
+
+def active_llm_provider(settings: Settings) -> str:
+    """Fall back when the configured provider has no key, so a run still renders."""
+    provider = settings.llm_provider
+    if provider == "gemini" and settings.gemini_api_key:
+        return "gemini"
+    if provider == "openai" and settings.openai_api_key:
+        return "openai"
+    if provider == "xai" and settings.xai_api_key:
+        return "xai"
+    if provider == "local":
+        return "local"
+    if settings.gemini_api_key:
+        return "gemini"
+    if settings.openai_api_key:
+        return "openai"
+    if settings.xai_api_key:
+        return "xai"
+    return "local"
 
 
 def load_feed_urls(settings: Settings, project_root: Path | None = None) -> list[tuple[str, str | None]]:

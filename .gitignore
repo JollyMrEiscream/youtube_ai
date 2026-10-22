@@ -5,7 +5,9 @@ __pycache__/
 dist/
 build/
 output/
+data/
 *.mp3
 *.mp4
+*.wav
 .env
 client_secret*.json

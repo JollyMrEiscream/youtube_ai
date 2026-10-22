@@ -1,0 +1,112 @@
+name: Daily tech Shorts
+
+on:
+  schedule:
+    # 13:15 UTC every day. Change this cron if you want a different local morning.
+    - cron: "15 13 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "How many Shorts to render"
+        default: "5"
+        required: false
+
+# One run at a time. A second render or upload waits, so they cannot
+# clobber the saved state or upload the same Short twice.
+concurrency:
+  group: youtube-ai-shorts
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg and fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-liberation
+
+      - name: Install package
+        run: pip install -e .
+
+      # Cache is best-effort. A machine with a disk is the reliable way to keep
+      # the review queue and the "already used" story list. See the README.
+      - name: Restore story history and review queue
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data
+            output/review
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            shorts-state-
+
+      - name: Render today's Shorts into the review queue
+        env:
+          DAILY_SHORTS: ${{ github.event.inputs.count || vars.DAILY_SHORTS }}
+          NEWS_WINDOW_MINUTES: ${{ vars.NEWS_WINDOW_MINUTES }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          TTS_ENGINE: ${{ vars.TTS_ENGINE }}
+          TTS_VOICE: ${{ vars.TTS_VOICE }}
+          TTS_RATE: ${{ vars.TTS_RATE }}
+          TTS_MODEL: ${{ vars.TTS_MODEL }}
+          VIDEO_WIDTH: ${{ vars.VIDEO_WIDTH }}
+          VIDEO_HEIGHT: ${{ vars.VIDEO_HEIGHT }}
+          VIDEO_PRESET: ${{ vars.VIDEO_PRESET }}
+          CAPTURE_SOURCES: ${{ vars.CAPTURE_SOURCES }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          XAI_VIDEO_MODEL: ${{ vars.XAI_VIDEO_MODEL }}
+          MAX_AI_CLIPS_PER_DAY: ${{ vars.MAX_AI_CLIPS_PER_DAY }}
+          MAX_AI_CLIPS_PER_SHORT: ${{ vars.MAX_AI_CLIPS_PER_SHORT }}
+          XAI_MODEL: ${{ vars.XAI_MODEL }}
+          CLIP_REUSE_DAYS: ${{ vars.CLIP_REUSE_DAYS }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          YOUTUBE_PRIVACY: ${{ vars.YOUTUBE_PRIVACY }}
+          YOUTUBE_CATEGORY_ID: ${{ vars.YOUTUBE_CATEGORY_ID }}
+          YOUTUBE_TAGS: ${{ vars.YOUTUBE_TAGS }}
+          AUTO_UPLOAD: ${{ vars.AUTO_UPLOAD }}
+          SKIP_REVIEW: ${{ vars.SKIP_REVIEW }}
+          MAX_UPLOADS_PER_DAY: ${{ vars.MAX_UPLOADS_PER_DAY }}
+          UPLOAD_QUOTA_COST: ${{ vars.UPLOAD_QUOTA_COST }}
+          YOUTUBE_DAILY_QUOTA_UNITS: ${{ vars.YOUTUBE_DAILY_QUOTA_UNITS }}
+          # Default on, so a scheduled run never uploads until you set DRY_RUN to 0.
+          DRY_RUN: ${{ vars.DRY_RUN || '1' }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          RSS_FEED_URLS: ${{ secrets.RSS_FEED_URLS }}
+        run: python -m news_youtube_bot run
+
+      # restore does not save. This step runs even when the render fails,
+      # so today's Grok count, used clips, and the review queue are kept.
+      - name: Ensure state directories exist
+        if: always()
+        run: mkdir -p data output/review && touch data/.keep output/review/.keep
+
+      - name: Persist saved state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data
+            output/review
+          key: shorts-state-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the review queue
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-queue
+          path: output/review
+          if-no-files-found: warn

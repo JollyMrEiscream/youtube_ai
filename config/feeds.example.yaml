@@ -1,8 +1,21 @@
 # Copy to config/feeds.yaml and customize.
-# Each entry is either a string (RSS URL) or { url: "...", name: "optional label" }
+# Each entry is a string (RSS URL) or { url, name }.
+# Keep this list on technology outlets. The ranker treats RSS items as tech stories.
 
 feeds:
-  - url: https://feeds.bbci.co.uk/news/world/rss.xml
-    name: BBC World
-  - url: https://www.theguardian.com/world/rss
-    name: Guardian World
+  - url: https://hnrss.org/frontpage
+    name: Hacker News
+  - url: https://www.theverge.com/rss/index.xml
+    name: The Verge
+  - url: https://techcrunch.com/feed/
+    name: TechCrunch
+  - url: https://feeds.arstechnica.com/arstechnica/index
+    name: Ars Technica
+  - url: https://www.wired.com/feed/rss
+    name: Wired
+  - url: https://www.technologyreview.com/feed/
+    name: MIT Tech Review
+  - url: https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
+    name: NYT Technology
+  - url: https://feeds.bbci.co.uk/news/technology/rss.xml
+    name: BBC Technology

@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from google import genai
 from google.genai import types
 
 from news_youtube_bot.llm_rank import SYSTEM as RANK_SYSTEM
-from news_youtube_bot.llm_script import SYSTEM as SCRIPT_SYSTEM
+from news_youtube_bot.llm_script import normalize_script_payload, script_request
 from news_youtube_bot.models import NewsItem
+from news_youtube_bot.variety import Profile
 
 logger = logging.getLogger(__name__)
 
@@ -76,32 +76,22 @@ def rank_stories_gemini(
 def build_script_gemini(
     api_key: str,
     model_name: str,
-    items: list[NewsItem],
+    item: NewsItem,
+    profile: Profile,
+    excerpt: str = "",
 ) -> dict[str, Any]:
     client = genai.Client(api_key=api_key)
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    stories = [it.to_llm_dict() for it in items]
-    user = json.dumps({"utc_date": today, "stories": stories}, ensure_ascii=False)
-
+    system, user = script_request(item, profile, excerpt)
     response = client.models.generate_content(
         model=model_name,
         contents=user,
         config=types.GenerateContentConfig(
-            system_instruction=SCRIPT_SYSTEM,
+            system_instruction=system,
             response_mime_type="application/json",
-            temperature=0.5,
-            max_output_tokens=8192,
+            temperature=0.7,
+            max_output_tokens=4096,
         ),
     )
-    data = _json_from_response(response)
-    script = (data.get("script") or "").strip()
-    if not script:
-        raise ValueError("Gemini returned empty script")
-    data["script"] = script
-    data.setdefault("video_title", "News summary")
-    data.setdefault("description", "")
-    data.setdefault("tags", [])
-    if not isinstance(data["tags"], list):
-        data["tags"] = []
-    logger.info("Gemini script generated, title=%s", str(data.get("video_title"))[:60])
+    data = normalize_script_payload(_json_from_response(response), item)
+    logger.info("Gemini script title=%s", str(data.get("video_title"))[:60])
     return data

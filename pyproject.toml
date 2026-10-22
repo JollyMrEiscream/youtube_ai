@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "news-youtube-bot"
-version = "0.1.0"
-description = "Hourly RSS news digest to AI voiceover video and YouTube upload"
+version = "0.2.0"
+description = "Daily technology YouTube Shorts from fresh news, with review before upload"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -20,6 +20,9 @@ dependencies = [
     "pyyaml>=6.0",
     "edge-tts>=6.1",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 news-youtube-bot = "news_youtube_bot.__main__:main"

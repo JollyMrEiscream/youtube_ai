@@ -11,10 +11,13 @@ from news_youtube_bot.models import NewsItem
 logger = logging.getLogger(__name__)
 
 
-SYSTEM = """You are a news editor. Given RSS headlines and short summaries only, rank stories by combined importance, novelty, and diversity (avoid picking multiple items about the same event).
+SYSTEM = """You are an editor picking stories for separate YouTube Shorts about technology news.
+Rank by how well a story stands alone in under a minute: one concrete development, visual, and not a duplicate of another item.
+Prefer fresh technology, science, gadgets, AI, security, and chips over politics, hiring threads, and listicles.
+Do not pick two items about the same event.
 Respond with JSON only, no markdown. Schema:
 {"ranked_ids": ["id1", "id2", ...], "notes": {"id1": "one short reason"}}
-Order `ranked_ids` from most to least important. Only include ids from the provided list."""
+Order `ranked_ids` from the best Short to the weakest. Only include ids from the provided list."""
 
 
 def rank_stories(
